@@ -13,7 +13,10 @@ library(jsonlite)
 library(stringr)
 library(gridExtra)
 library(ggplot2)
-
+library(tm)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
 # JSON (don't run) --------------------------------------------------------------------
 
 #Trying to parse the data 
@@ -310,6 +313,56 @@ following_parsing_fam <- function(large_list){
   }
   return(first_df)
 }
+
+word_frequency_plot <- function (data_frame_word_frequency){
+  
+  # Creating the corpus and removing punctuation, whitespaces and more.
+  tweets_caq <- Corpus(VectorSource(c(unlist(data_frame_word_frequency$text_v))))
+  tweets <- tm_map(tweets_caq, content_transformer(tolower))
+  tweets <- tm_map(tweets, removePunctuation)
+  tweets <- tm_map(tweets, removeNumbers)
+  tweets <- tm_map(tweets, stripWhitespace)
+  
+  # Creating a matrix that counts frequency each word is mentioned on each tweet
+  # matrix has nrows = number of tweets, ncols = number of words used in all the corpus
+  dtm <- DocumentTermMatrix(tweets)
+  dtm_df <- as.data.frame(as.matrix(dtm))
+  
+  # Creating a bit matrix based on dtm_df matrix. 
+  # Regardless of how many times a word is present in a tweet, if it's present, 
+  # put a 1 and a 0 otherwise. We use the bit matrix to obtain the total number of likes
+  # of the tweets where each word was mentioned. We do this by means of vectorization
+  bit_matrix <- matrix(0, nrow = nrow(dtm_df), ncol = ncol(dtm_df))
+  bit_matrix[dtm_df != 0] <- 1
+  
+  # We create a vector containing the number of likes each tweet had.
+  tweets_likes <- data_frame_word_frequency$like_v
+  
+  # We multiply the bit matrix times the number of likes each tweet had. 
+  # See that the max number of likes a tweet received is 7706 and clearly 
+  # after this product we have number that are significantly bigger than that one. 
+  # This is because tweets_likes contain the likes each tweet had,
+  # and likes_each_word contains the SUM of the likes received by ALL the tweets
+  # where the word was mentioned. 
+  likes_each_word = crossprod(bit_matrix,tweets_likes)
+  
+  freq <- data.frame(colSums(as.matrix(dtm)))
+  freq$num_likes <- likes_each_word
+  colnames(freq) <- c("freq_of_use","num_likes")
+  freq <- freq[order(freq$freq_of_use, decreasing = TRUE), ]
+  
+  ert = data.frame(freq)
+  
+  # Gathering spanish stopwrods and removing them (not used yet but at the end over the df!)
+  stopwords_regex = paste(stopwords('spanish'), collapse = '\\b|\\b')
+  stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
+  
+  # Get the row names of ert that are not in the stopwords
+  rows_to_keep <- rownames(ert)[!grepl(stopwords_regex, rownames(ert))]
+  ert_filtered <- ert[rows_to_keep, ]
+  return(ert_filtered)
+}
+
 # Parsing the data (run) --------------------------------------------------------
 fabri_a <- parse_info(fabri_a)
 carlos_a <- parse_info(carlos_a)
@@ -565,37 +618,6 @@ max_num_likes_fam <- max(merged_df$fam_likes)
 merged_df$engagement_caq <- merged_df$caq_likes/max_num_likes_caq
 merged_df$engagement_fam <- merged_df$fam_likes/max_num_likes_fam
   
-# Implementing Frequency Distribution (don't run) -------------------------------------
-library(tm)
-tweets_caq <- Corpus(VectorSource(c(unlist(carlos_a_f$text_v))))
-tweets <- tm_map(tweets_caq, content_transformer(tolower))
-tweets <- tm_map(tweets, removePunctuation)
-tweets <- tm_map(tweets, removeNumbers)
-tweets <- tm_map(tweets, stripWhitespace)
-
-stopwords_regex = paste(stopwords('spanish'), collapse = '\\b|\\b')
-stopwords_regex = paste0('\\b', stopwords_regex, '\\b')
-tweets = stringr::str_replace_all(tweets, stopwords_regex, '')
-
-dtm <- DocumentTermMatrix(tweets)
-freq <- colSums(as.matrix(dtm))
-freq <- sort(freq, decreasing = TRUE)
-
-ert = data.frame(freq)
-
-tweets_fam <- Corpus(VectorSource(c(unlist(fabri_a_f$text_v))))
-tweets_fam <- tm_map(tweets_fam, content_transformer(tolower))
-tweets_fam <- tm_map(tweets_fam, removePunctuation)
-tweets_fam <- tm_map(tweets_fam, removeNumbers)
-tweets_fam <- tm_map(tweets_fam, stripWhitespace)
-
-dtm_f <- DocumentTermMatrix(tweets_fam)
-freq_f <- colSums(as.matrix(dtm_f))
-freq_f <- sort(freq_f, decreasing = TRUE)
-
-ert_f = data.frame(freq_f)
-
-
 # Filtering only the most polarized users (run) ---------------------------------
 
 # Identifying most porlarized users of CAQ - extracting 5% of users with the most likes given
@@ -770,3 +792,160 @@ ggplot(df_long, aes(x = engagement_index, y = percentage, fill = network_categor
   labs(x = "Engagement Index", y = "Percentage of Network", fill = "") +  # Remove legend title
   ggtitle("FAM - Engagement vs Polarization")  # Add plot title
   
+# Creating plot of Change of Speech by used words - Entire Period - Carlos Alvarado Quesada (run)-------------------------------------
+
+carlos_a_chspeech_entire_period = word_frequency_plot(carlos_a_f)
+
+# Making the plot
+# Plotting only words that were mentioned more than 50 times. 
+subset_df <- subset(carlos_a_chspeech_entire_period, freq_of_use > 50)
+word_to_highlight <- c("amor","respeto")
+
+ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
+  geom_point(color = "#336699") +
+  geom_text_repel(data = subset_df, aes(label = rownames(subset_df)), size = 3, color = ifelse(rownames(subset_df) %in% word_to_highlight, "red", "black")) +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(y = "Number of Likes", x = "Frequency of Use") +
+  labs(title = "Words used by CAQ", subtitle = "30/10/2017 - 08/04/2018") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(size = 9))
+
+
+# Creating plot of Change of Speech by used words - Before and After CourtRuling - Carlos Alvarado Quesada (run) -------------------------------------------------------------
+
+before_court_ruling_caq <- carlos_a_f %>% filter(date_creation_v <=  as.Date("2018-01-09"))
+after_court_ruling_caq <- carlos_a_f %>% filter(date_creation_v >  as.Date("2018-01-09"))
+
+carlos_a_chspeech_before_court = word_frequency_plot(before_court_ruling_caq)
+carlos_a_chspeech_after_court = word_frequency_plot(after_court_ruling_caq)
+
+# Manual count of the words
+
+carlos_used_words_before <- carlos_a_chspeech_before_court[rownames(carlos_a_chspeech_before_court) %in% c("amor","familia","respeto","dios","aborto","valores"),]
+carlos_used_words_after <- carlos_a_chspeech_after_court[rownames(carlos_a_chspeech_after_court) %in% c("amor","familia","respeto","dios","aborto","valores"),]
+
+# Merge the tables by row names
+carlos_used_words_table <- merge(carlos_used_words_before, carlos_used_words_after, by = 0, all = TRUE)
+
+# Rename the merged row names column
+colnames(carlos_used_words_table) <- c("word","Freq Before","Likes Before","Freq After","Likes After")
+carlos_used_words_table <- carlos_used_words_table[,c(1,2,4,3,5)]
+carlos_used_words_table[is.na(carlos_used_words_table)] <- 0
+
+
+carlos_used_words_table <- kable(carlos_used_words_table, format = "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = c("striped", "hold_position"),
+                font_size = 12, full_width = FALSE)
+
+# Making the plot
+# Plotting only words that were mentioned more than 50 times. 
+subset_df <- subset(carlos_a_chspeech_before_court, freq_of_use > 9)
+word_to_highlight <- c("amor","respeto","familia")
+
+ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
+  geom_point(color = "#336699") +
+  geom_text_repel(data = subset_df, aes(label = rownames(subset_df)), size = 3, color = ifelse(rownames(subset_df) %in% word_to_highlight, "red", "black")) +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(y = "Number of Likes", x = "Frequency of Use") +
+  labs(title = "Words used by CAQ - Before ruling", subtitle = "30/10/2017 - 09/01/2018") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(size = 9))
+
+subset_df <- subset(carlos_a_chspeech_after_court, freq_of_use >= 30)
+word_to_highlight <- c("amor","respeto","familia")
+
+ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
+  geom_point(color = "#336699") +
+  geom_text_repel(data = subset_df, aes(label = rownames(subset_df)), size = 3, 
+                  color = ifelse(rownames(subset_df) %in% word_to_highlight, "red", "black")) +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(y = "Number of Likes", x = "Frequency of Use") +
+  labs(title = "Words used by CAQ - After ruling", subtitle = "10/01/2018 - 08/04/2018") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(size = 9))
+
+
+# Creating the plot of Change of Speech by used words - Entire Period - Fabricio Alvarado Monge (run) ----------------------------------------------------------------
+
+
+# ********* FAM ********** #
+fabri_a_chspeech_entire_period = word_frequency_plot(fabri_a_f)
+
+# Making the plot
+# Plotting only words that were mentioned more than 50 times. 
+subset_df <- subset(fabri_a_chspeech_entire_period, freq_of_use >= 5)
+word_to_highlight <- c("amor","respeto","familia","dios","aborto","valores")
+
+ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
+  geom_point(color = "#336699") +
+  geom_text_repel(data = subset_df, aes(label = rownames(subset_df)), size = 3, color = ifelse(rownames(subset_df) %in% word_to_highlight, "red", "black")) +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(y = "Number of Likes", x = "Frequency of Use") +
+  labs(title = "Words used by FAM", subtitle = "30/10/2017 - 08/04/2018") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(size = 9))
+
+
+
+# Creating plot of Change of Speech by used words - Before and After CourtRuling - Fabricio Alvarado Monge (run) ------------------------------------------------------------------
+
+before_court_ruling_fam <- fabri_a_f %>% filter(date_creation_v <=  as.Date("2018-01-09"))
+after_court_ruling_fam <- fabri_a_f %>% filter(date_creation_v >  as.Date("2018-01-09"))
+
+fabri_a_chspeech_before_court = word_frequency_plot(before_court_ruling_fam)
+fabri_a_chspeech_after_court = word_frequency_plot(after_court_ruling_fam)
+
+# Manual count of the words
+
+fabricio_used_words_before <- fabri_a_chspeech_before_court[rownames(fabri_a_chspeech_before_court) %in% c("amor","respeto","familia","dios","aborto","valores"),]
+fabricio_used_words_after <- fabri_a_chspeech_after_court[rownames(fabri_a_chspeech_after_court) %in% c("amor","respeto","familia","dios","aborto","valores"),]
+
+# Merge the tables by row names
+fabricio_used_words_table <- merge(fabricio_used_words_before, fabricio_used_words_after, by = 0, all = TRUE)
+
+# Rename the merged row names column
+colnames(fabricio_used_words_table) <- c("word","Freq Before","Likes Before","Freq After","Likes After")
+fabricio_used_words_table[is.na(fabricio_used_words_table)] <- 0
+fabricio_used_words_table <- fabricio_used_words_table[,c(1,2,4,3,5)]
+
+
+fabricio_used_words_table <- kable(fabricio_used_words_table, format = "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = c("striped", "hold_position"),
+                font_size = 12, full_width = FALSE)
+
+# Making the plot
+# Plotting only words that were mentioned more than 50 times. 
+subset_df <- subset(carlos_a_chspeech_before_court, freq_of_use > 9)
+word_to_highlight <- c("amor","respeto","familia")
+
+ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
+  geom_point(color = "#336699") +
+  geom_text_repel(data = subset_df, aes(label = rownames(subset_df)), size = 3, color = ifelse(rownames(subset_df) %in% word_to_highlight, "red", "black")) +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(y = "Number of Likes", x = "Frequency of Use") +
+  labs(title = "Words used by CAQ - Before ruling", subtitle = "30/10/2017 - 09/01/2018") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(size = 9))
+
+subset_df <- subset(carlos_a_chspeech_after_court, freq_of_use >= 30)
+word_to_highlight <- c("amor","respeto","familia")
+
+ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
+  geom_point(color = "#336699") +
+  geom_text_repel(data = subset_df, aes(label = rownames(subset_df)), size = 3, 
+                  color = ifelse(rownames(subset_df) %in% word_to_highlight, "red", "black")) +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(y = "Number of Likes", x = "Frequency of Use") +
+  labs(title = "Words used by CAQ - After ruling", subtitle = "10/01/2018 - 08/04/2018") +
+  theme_bw() +
+  theme(plot.subtitle = element_text(size = 9))
+
+
+
+
