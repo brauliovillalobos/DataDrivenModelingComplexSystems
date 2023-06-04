@@ -12,7 +12,7 @@ library(rjson)
 library(jsonlite)
 library(stringr)
 library(gridExtra)
-
+library(ggplot2)
 
 # JSON (don't run) --------------------------------------------------------------------
 
@@ -291,6 +291,25 @@ following_parsing <- function(large_list){
   return(first_df)
 }
 
+following_parsing_fam <- function(large_list){
+  
+  first_df <- data.frame()
+  for(t in 1:length(following_pol_fam)){
+    user_id <- c(large_list[[t]]$id)
+    username <- c(large_list[[t]]$username)
+    name <- c(large_list[[t]]$name)
+    created_at <- c(large_list[[t]]$created_at)
+    location <- c(large_list[[t]]$location)
+    followers_count <- c(large_list[[t]]$public_metrics$followers_count)
+    following_count <- c(large_list[[t]]$public_metrics$following_count)
+    tweet_count <- c(large_list[[t]]$public_metrics$tweet_count)
+    
+    first_df <- rbind(first_df, data.frame(user_id, username, name, created_at,
+                                           location, followers_count,
+                                           following_count, tweet_count))
+  }
+  return(first_df)
+}
 # Parsing the data (run) --------------------------------------------------------
 fabri_a <- parse_info(fabri_a)
 carlos_a <- parse_info(carlos_a)
@@ -433,6 +452,28 @@ ggplot(data = df, aes(x = polariz_plot)) +
 #setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_carlos_avl")
 #write.table(users_to_explore_caq, "user_ids.txt", sep = "\n", row.names = FALSE, col.names = FALSE)
 
+
+#most_polarized_fam <- merged_df %>% filter(cumsum_fam<0.30)
+#users_to_explore_fam <- as.integer64(most_polarized_fam$user_id)
+#setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_fabricio_alv")
+#write.table(users_to_explore_fam, "user_ids.txt", sep = "\n", row.names = FALSE, col.names = FALSE)
+
+#What happened here? To make the plot of polarization index vs engagement, I first tried and tested
+#with CAQ and didn't do the same for FAM. The way in which I did it for CAQ wasn't efficient. 
+#Since I put ALL the users that liked tweets of CAQ into analysis by adding their users in the 
+#user_idx.txt file, that was then used to run the "following" comand on twarc to extract
+#the users followed by each of the users in analysis. This was inefficient because we don't need
+#to analyze all the users that liked a tweet of CAQ but only those that were more active 
+#in liking tweets on CAQ. 
+#For this reason, when I replicated the analysis for FAM, instead of putting all the users that liked
+#his tweets into the "user_ids.txt" file, I only put the highest 30% of users that liked the most
+#FAM's tweets. Why 30%? To have a higher number than needed in case it is useful. However, since FAM has
+#such a small number of tweets and CAQ such a high number, we can't use the 30%. 
+#Then, this is the reason why I put within the user_idx.txt only the id of users that are within
+#the 30% of highest liking rate to FAM and NOT all the users that liked his tweets. 
+#This is the right decision in terms of efficient (to cop with Twitter's restrictions) but also
+#because it isn't necessary to have this information as we won't be using it. 
+
 # Exploring activity of candidates (run) ----------------------------------------
 
 daily_tweet_activity <- function(data_frame_i){
@@ -555,7 +596,7 @@ freq_f <- sort(freq_f, decreasing = TRUE)
 ert_f = data.frame(freq_f)
 
 
-# Filtering only the most polarized users ---------------------------------
+# Filtering only the most polarized users (run) ---------------------------------
 
 # Identifying most porlarized users of CAQ - extracting 5% of users with the most likes given
 merged_df <- merged_df %>% arrange(desc(caq_likes))
@@ -564,22 +605,10 @@ most_polarized_caq <- merged_df %>% filter(cumsum_caq<0.10)
 # Identifying most polarized users of FAM
 merged_df <- merged_df %>% arrange(desc(fam_likes))
 merged_df$cumsum_fam <- cumsum(merged_df$fam_likes)/sum(merged_df$fam_likes)
-most_polarized_fam <- merged_df %>% filter(cumsum_fam<0.10)
-
-# We're going to analyze ONLY the most polarized user... for the moment
-setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_carlos_avl")
-
-following_pol_caq <- stream_in(file("45709799_user_following.jsonl"),pagesize = 10000)
-following_pol_caq <- following_pol_caq$data
-
-# Extracting info for 1 user
-qwe <- following_parsing(following_pol_caq)
-# Check which users, that are part of the network of the analyzed user, liked any tweet from the candidates
-qwe_present_in_merged <- qwe[qwe$user_id %in% merged_df$user_id,]
-# Keep info of only those users and discard any user that was part of a network but didn't like a tweet
-qwe_present_in_merged <- left_join(qwe_present_in_merged,merged_df, by = "user_id")
+most_polarized_fam <- merged_df %>% filter(cumsum_fam<0.20)
 
 
+# Creating plot of Engagement vs Polarization - Carlos Alvarado Quesada (run)-----------------------------
 # Do a loop to read different users from a list
 setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_carlos_avl")
 
@@ -620,7 +649,7 @@ for(user_t in 1:length(most_polarized_caq$user_id)){
   fraction_network <- rbind(fraction_network,classified_following_network)
 }
 
-testest <- left_join(fraction_network,merged_df,by = c("source_user_id" = "user_id"))
+eng_pol_caq <- left_join(fraction_network,merged_df,by = c("source_user_id" = "user_id"))
 
 # Testing that we actually took all the users in the folder
 dim(total_data_frame)
@@ -630,26 +659,114 @@ library(ggplot2)
 
 # Create example data
 set.seed(123) # For reproducibility
-n_users <- dim(testest)[1]
+n_users <- dim(eng_pol_caq)[1]
 engagement_index <- runif(n_users, 0, 1)
-network_category1 <- runif(n_users, 0, 0.5)
-network_category2 <- runif(n_users, 0, 0.3)
-network_category3 <- runif(n_users, 0, 0.1)
-network_category4 <- 1 - network_category1 - network_category2 - network_category3
+not_engaged <- runif(n_users, 0, 0.5)
+not_polarized <- runif(n_users, 0, 0.3)
+fam_polarized <- runif(n_users, 0, 0.1)
+caq_polarized <- 1 - not_engaged - not_polarized - fam_polarized
 
-df <- data.frame(engagement_index = testest$engagement_caq,
-                 network_category1 = testest$not_engaged,
-                 network_category2 = testest$not_polarized,
-                 network_category3 = testest$fam_polarized,
-                 network_category4 = testest$caq_polarized)
+df <- data.frame(engagement_index = eng_pol_caq$engagement_caq,
+                 not_engaged = eng_pol_caq$not_engaged,
+                 not_polarized = eng_pol_caq$not_polarized,
+                 fam_polarized = eng_pol_caq$fam_polarized,
+                 caq_polarized = eng_pol_caq$caq_polarized)
 
 # Reshape data to long format
 df_long <- tidyr::gather(df, key = "network_category", value = "percentage", 
-                         network_category1:network_category4)
+                         not_engaged:caq_polarized)
 
-# Create stacked area plot
+# Define custom order of network categories
+custom_order <- c("not_engaged", "not_polarized", "fam_polarized", "caq_polarized")
+
+# Convert network_category to a factor with custom order
+df_long$network_category <- factor(df_long$network_category, levels = custom_order)
+
+
 ggplot(df_long, aes(x = engagement_index, y = percentage, fill = network_category)) +
   geom_area() +
-  scale_fill_manual(values = c("gray", "#F0E442", "blue", "red")) + # Change colors as desired
-  labs(x = "Engagement Index", y = "Percentage of Network", fill = "Network Category")
+  scale_fill_manual(values = c("#999999", "#AAAAAA", "red", "#336699")) +  # Update colors to coordinated shades of gray and blue
+  labs(x = "Engagement Index", y = "Percentage of Network", fill = "") +  # Remove legend title
+  ggtitle("CAQ - Engagement vs Polarization")  # Add plot title
 
+# Creating plot of Engagement vs Polarization - Fabricio Alvarado Monge (run)-----------------------------
+# Do a loop to read different users from a list
+setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_fabricio_alv")
+
+# Dataframe that collects everything??
+total_data_frame_fam <- data.frame()
+# Dataframe that collects the analyzed polarized users and finds the percentage of its following network
+# that is polarized towards one or the other candidate or that isn't polarized or engaged.
+fraction_network_fam <- data.frame()
+
+#for each user in the polarized users that we have decided to analyze
+for(user_t in 1:length(most_polarized_fam$user_id)){
+  # Identify the source user, who is the one for whom we're gonna analyze its network
+  source_user <- most_polarized_fam$user_id[user_t]
+
+  # Extract the following network retrieved for this user
+  doc_to_extract <- paste0(source_user,"_user_following.jsonl")
+  following_pol_fam <- stream_in(file(doc_to_extract),pagesize = 10000)
+  following_pol_fam <- following_pol_fam$data
+  
+  # Parse the data
+  following_parsed_fam <- following_parsing_fam(following_pol_fam)
+  # Identify users that 1) are part of the users' network and 2) have liked at least
+  # 1 tweet of one of the two candidates.
+  following_present_in_merged_fam <- following_parsed_fam[following_parsed_fam$user_id %in% merged_df$user_id,]
+  
+  if(nrow(following_present_in_merged_fam) == 0){
+    next
+  }
+  # Paste the information of these users
+  following_present_in_merged_fam <- left_join(following_present_in_merged_fam,merged_df, by = "user_id")
+  
+  # Creating a new column with the source user, IN CASE IT IS USEFUL
+  following_present_in_merged_fam$source_user <- source_user
+  # Updating a dataframe with ALL the network of ALL the analyzed users, IN CASE IT IS USEFUL
+  total_data_frame_fam <- rbind(total_data_frame_fam,following_present_in_merged_fam)
+  
+  # Classifying the following network of the user being analyzed
+  classified_following_network_fam <- classifying_fraction_network(following_present_in_merged_fam)
+  # Pasting the source user and its engagement
+  classified_following_network_fam$source_user_id <- source_user
+  # Building the final dataframe
+  fraction_network_fam <- rbind(fraction_network_fam,classified_following_network_fam)
+}
+
+eng_pol_fam <- left_join(fraction_network_fam,merged_df,by = c("source_user_id" = "user_id"))
+
+library(ggplot2)
+
+# Create example data
+set.seed(123) # For reproducibility
+n_users <- dim(eng_pol_fam)[1]
+engagement_index <- runif(n_users, 0, 1)
+not_engaged <- runif(n_users, 0, 0.5)
+not_polarized <- runif(n_users, 0, 0.3)
+fam_polarized <- runif(n_users, 0, 0.1)
+caq_polarized <- 1 - not_engaged - not_polarized - fam_polarized
+
+df <- data.frame(engagement_index = eng_pol_fam$engagement_fam,
+                 not_engaged = eng_pol_fam$not_engaged,
+                 not_polarized = eng_pol_fam$not_polarized,
+                 fam_polarized = eng_pol_fam$fam_polarized,
+                 caq_polarized = eng_pol_fam$caq_polarized)
+
+# Reshape data to long format
+df_long <- tidyr::gather(df, key = "network_category", value = "percentage", 
+                         not_engaged:caq_polarized)
+
+# Define custom order of network categories
+custom_order <- c("not_engaged", "not_polarized","caq_polarized", "fam_polarized")
+
+# Convert network_category to a factor with custom order
+df_long$network_category <- factor(df_long$network_category, levels = custom_order)
+
+
+ggplot(df_long, aes(x = engagement_index, y = percentage, fill = network_category)) +
+  geom_area() +
+  scale_fill_manual(values = c("#999999", "#AAAAAA", "#336699","red")) +  # Update colors to coordinated shades of gray and blue
+  labs(x = "Engagement Index", y = "Percentage of Network", fill = "") +  # Remove legend title
+  ggtitle("FAM - Engagement vs Polarization")  # Add plot title
+  
