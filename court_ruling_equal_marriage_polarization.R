@@ -17,6 +17,10 @@ library(tm)
 library(ggrepel)
 library(knitr)
 library(kableExtra)
+library(gridExtra)
+library(rvest)
+library(bit64)
+library(latex2exp)
 # JSON (don't run) --------------------------------------------------------------------
 
 #Trying to parse the data 
@@ -266,8 +270,8 @@ dict_likes_count <- function(file_list_i){
 classifying_fraction_network <- function(data_frame_i){
   classified_network <- data_frame_i %>% 
     summarise(
-      fam_polarized = mean(polariz_index < -0.5) * 100,
-      caq_polarized = mean(polariz_index > 0.5) * 100,
+      fam_polarized = mean(polariz_index <= -0.5) * 100,
+      caq_polarized = mean(polariz_index >= 0.5) * 100,
       not_polarized = mean(polariz_index == 0) * 100,
       not_engaged = mean(polariz_index > -0.5 & polariz_index < 0.5 & polariz_index != 0) * 100
     )
@@ -499,6 +503,8 @@ ggplot(data = df, aes(x = polariz_plot)) +
   scale_fill_gradient(low = "red", high = "blue") +
   labs(title = "User polarization", x = "Polarization Index", y = "PDF")
 
+
+
 # Retrieving the network of followers (not run) -------------------------------------
 
 #users_to_explore_caq <- as.integer64(count_likes_dict_caq$user_id)
@@ -629,88 +635,6 @@ merged_df <- merged_df %>% arrange(desc(fam_likes))
 merged_df$cumsum_fam <- cumsum(merged_df$fam_likes)/sum(merged_df$fam_likes)
 most_polarized_fam <- merged_df %>% filter(cumsum_fam<0.20)
 
-
-# Creating plot of Engagement vs Polarization - Carlos Alvarado Quesada (run)-----------------------------
-# Do a loop to read different users from a list
-setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_carlos_avl")
-
-# Dataframe that collects everything??
-total_data_frame <- data.frame()
-# Dataframe that collects the analyzed polarized users and finds the percentage of its following network
-# that is polarized towards one or the other candidate or that isn't polarized or engaged.
-fraction_network <- data.frame()
-
-#for each user in the polarized users that we have decided to analyze
-for(user_t in 1:length(most_polarized_caq$user_id)){
-  # Identify the source user, who is the one for whom we're gonna analyze its network
-  source_user <- most_polarized_caq$user_id[user_t]
-  # Extract the following network retrieved for this user
-  doc_to_extract <- paste0(source_user,"_user_following.jsonl")
-  following_pol_caq <- stream_in(file(doc_to_extract),pagesize = 10000)
-  following_pol_caq <- following_pol_caq$data
-  
-  # Parse the data
-  following_parsed <- following_parsing(following_pol_caq)
-  # Identify users that 1) are part of the users' network and 2) have liked at least
-  # 1 tweet of one of the two candidates.
-  following_present_in_merged <- following_parsed[following_parsed$user_id %in% merged_df$user_id,]
-  # Paste the information of these users
-  following_present_in_merged <- left_join(following_present_in_merged,merged_df, by = "user_id")
-  
-  # Creating a new column with the source user, IN CASE IT IS USEFUL
-  following_present_in_merged$source_user <- source_user
-  # Updating a dataframe with ALL the network of ALL the analyzed users, IN CASE IT IS USEFUL
-  total_data_frame <- rbind(total_data_frame,following_present_in_merged)
-  
-  # Classifying the following network of the user being analyzed
-  classified_following_network <- classifying_fraction_network(following_present_in_merged)
-  # Pasting the source user and its engagement
-  classified_following_network$source_user_id <- source_user
-  #classified_following_network$source_user_engagement <- 
-  # Building the final dataframe
-  fraction_network <- rbind(fraction_network,classified_following_network)
-}
-
-eng_pol_caq <- left_join(fraction_network,merged_df,by = c("source_user_id" = "user_id"))
-
-# Testing that we actually took all the users in the folder
-dim(total_data_frame)
-
-
-library(ggplot2)
-
-# Create example data
-set.seed(123) # For reproducibility
-n_users <- dim(eng_pol_caq)[1]
-engagement_index <- runif(n_users, 0, 1)
-not_engaged <- runif(n_users, 0, 0.5)
-not_polarized <- runif(n_users, 0, 0.3)
-fam_polarized <- runif(n_users, 0, 0.1)
-caq_polarized <- 1 - not_engaged - not_polarized - fam_polarized
-
-df <- data.frame(engagement_index = eng_pol_caq$engagement_caq,
-                 not_engaged = eng_pol_caq$not_engaged,
-                 not_polarized = eng_pol_caq$not_polarized,
-                 fam_polarized = eng_pol_caq$fam_polarized,
-                 caq_polarized = eng_pol_caq$caq_polarized)
-
-# Reshape data to long format
-df_long <- tidyr::gather(df, key = "network_category", value = "percentage", 
-                         not_engaged:caq_polarized)
-
-# Define custom order of network categories
-custom_order <- c("not_engaged", "not_polarized", "fam_polarized", "caq_polarized")
-
-# Convert network_category to a factor with custom order
-df_long$network_category <- factor(df_long$network_category, levels = custom_order)
-
-
-ggplot(df_long, aes(x = engagement_index, y = percentage, fill = network_category)) +
-  geom_area() +
-  scale_fill_manual(values = c("#999999", "#AAAAAA", "red", "#336699")) +  # Update colors to coordinated shades of gray and blue
-  labs(x = "Engagement Index", y = "Percentage of Network", fill = "") +  # Remove legend title
-  ggtitle("CAQ - Engagement vs Polarization")  # Add plot title
-
 # Creating plot of Engagement vs Polarization - Fabricio Alvarado Monge (run)-----------------------------
 # Do a loop to read different users from a list
 setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_fabricio_alv")
@@ -792,6 +716,87 @@ ggplot(df_long, aes(x = engagement_index, y = percentage, fill = network_categor
   labs(x = "Engagement Index", y = "Percentage of Network", fill = "") +  # Remove legend title
   ggtitle("FAM - Engagement vs Polarization")  # Add plot title
   
+# Creating plot of Engagement vs Polarization - Carlos Alvarado Quesada (run)-----------------------------
+# Do a loop to read different users from a list
+setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_carlos_avl")
+
+# Dataframe that collects everything??
+total_data_frame <- data.frame()
+# Dataframe that collects the analyzed polarized users and finds the percentage of its following network
+# that is polarized towards one or the other candidate or that isn't polarized or engaged.
+fraction_network <- data.frame()
+
+#for each user in the polarized users that we have decided to analyze
+for(user_t in 1:length(most_polarized_caq$user_id)){
+  # Identify the source user, who is the one for whom we're gonna analyze its network
+  source_user <- most_polarized_caq$user_id[user_t]
+  # Extract the following network retrieved for this user
+  doc_to_extract <- paste0(source_user,"_user_following.jsonl")
+  following_pol_caq <- stream_in(file(doc_to_extract),pagesize = 10000)
+  following_pol_caq <- following_pol_caq$data
+  
+  # Parse the data
+  following_parsed <- following_parsing(following_pol_caq)
+  # Identify users that 1) are part of the users' network and 2) have liked at least
+  # 1 tweet of one of the two candidates.
+  following_present_in_merged <- following_parsed[following_parsed$user_id %in% merged_df$user_id,]
+  # Paste the information of these users
+  following_present_in_merged <- left_join(following_present_in_merged,merged_df, by = "user_id")
+  
+  # Creating a new column with the source user, IN CASE IT IS USEFUL
+  following_present_in_merged$source_user <- source_user
+  # Updating a dataframe with ALL the network of ALL the analyzed users, IN CASE IT IS USEFUL
+  total_data_frame <- rbind(total_data_frame,following_present_in_merged)
+  
+  # Classifying the following network of the user being analyzed
+  classified_following_network <- classifying_fraction_network(following_present_in_merged)
+  # Pasting the source user and its engagement
+  classified_following_network$source_user_id <- source_user
+  #classified_following_network$source_user_engagement <- 
+  # Building the final dataframe
+  fraction_network <- rbind(fraction_network,classified_following_network)
+}
+
+eng_pol_caq <- left_join(fraction_network,merged_df,by = c("source_user_id" = "user_id"))
+
+# Testing that we actually took all the users in the folder
+dim(total_data_frame)
+
+
+library(ggplot2)
+
+# Create example data
+set.seed(425) # For reproducibility
+n_users <- dim(eng_pol_caq)[1]
+engagement_index <- runif(n_users, 0, 1)
+not_engaged <- runif(n_users, 0, 0.5)
+not_polarized <- runif(n_users, 0, 0.3)
+fam_polarized <- runif(n_users, 0, 0.1)
+caq_polarized <- 1 - not_engaged - not_polarized - fam_polarized
+
+df <- data.frame(engagement_index = eng_pol_caq$engagement_caq,
+                 not_engaged = eng_pol_caq$not_engaged,
+                 not_polarized = eng_pol_caq$not_polarized,
+                 fam_polarized = eng_pol_caq$fam_polarized,
+                 caq_polarized = eng_pol_caq$caq_polarized)
+
+# Reshape data to long format
+df_long <- tidyr::gather(df, key = "network_category", value = "percentage", 
+                         not_engaged:caq_polarized)
+
+# Define custom order of network categories
+custom_order <- c("not_engaged", "not_polarized", "fam_polarized", "caq_polarized")
+
+# Convert network_category to a factor with custom order
+df_long$network_category <- factor(df_long$network_category, levels = custom_order)
+
+
+ggplot(df_long, aes(x = engagement_index, y = percentage, fill = network_category)) +
+  geom_area() +
+  scale_fill_manual(values = c("#999999", "#AAAAAA", "red", "#336699")) +  # Update colors to coordinated shades of gray and blue
+  labs(x = "Engagement Index", y = "Percentage of Network", fill = "") +  # Remove legend title
+  ggtitle("CAQ - Engagement vs Polarization")  # Add plot title
+
 # Creating plot of Change of Speech by used words - Entire Period - Carlos Alvarado Quesada (run)-------------------------------------
 
 carlos_a_chspeech_entire_period = word_frequency_plot(carlos_a_f)
@@ -869,7 +874,6 @@ ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
 
 
 # Creating the plot of Change of Speech by used words - Entire Period - Fabricio Alvarado Monge (run) ----------------------------------------------------------------
-
 
 # ********* FAM ********** #
 fabri_a_chspeech_entire_period = word_frequency_plot(fabri_a_f)
@@ -949,3 +953,285 @@ ggplot(subset_df, aes(x = freq_of_use, y = num_likes)) +
 
 
 
+# Creating the Network - Clustering Coefficient, Degree Distribution, Avg Degree (run) ---------------------------
+
+total_data_frame_caq <- total_data_frame
+
+# See that here I'm not considering all the network but only the most polarized users. I have to 
+# replicate this but with the whole network instead of the total_data_frame which only contains only 
+# most polarized users. See also that from those users that were followed by the users that liked a tweet,
+# I'm only considering those that liked a tweet from CAQ or FAM. I'm therefore ignoring those that were followed
+# but didn't like any tweet of CAQ or FAM. 
+
+#How am I thinking on creating the before and after network??
+
+
+
+# What happens if we only consider the following network? 
+
+# Get unique user IDs
+users_caq <- unique(c(total_data_frame_caq$source_user, 
+                      total_data_frame_caq$user_id))
+users_fam <- unique(c(total_data_frame_fam$source_user, 
+                      total_data_frame_fam$user_id))
+
+# Create the vertices of the network
+vertices <- data.frame(name = unique(c(users_caq,users_fam)))
+
+# Create the edges
+# Following relationships of users ("from") that were following other users ("to")
+following_relat_caq <- data.frame(from = total_data_frame_caq$source_user,
+                                  to = total_data_frame_caq$user_id)
+following_relat_fam <- data.frame(from = total_data_frame_fam$source_user,
+                                  to = total_data_frame_fam$user_id)
+
+edges_total <- rbind(following_relat_caq,following_relat_fam)
+
+network2 <- graph.data.frame(d = edges_total,
+                            directed = FALSE,
+                            vertices = vertices)
+
+# Plotting the graph
+filtered_nodes <- V(network2)[degree(network2) > 100]
+
+subgraph <- induced_subgraph(network2, filtered_nodes)
+
+layout <- layout_with_fr(subgraph)
+layout <- layout_with_kk(subgraph)
+layout <- layout_with_fr(subgraph, grid = TRUE, dim = 2, area = length(V(subgraph)) ^ 2, cool = 0.99)
+plot(subgraph, layout = layout, vertex.label = NA, vertex.size = 30, edge.arrow.size = 0.5, edge.curved = 0.2)
+
+# Computing the clustering coefficient
+clustering_coefficient <- transitivity(network2, type = "global")
+clustering_coefficient
+
+# Average degree
+sum(degree(network2)) / vcount(network2)
+
+# Calculate the degree distribution
+degree_counts <- table(degree(network2))
+
+# Calculate the probability of each degree
+degree_probabilities <- degree_counts / sum(degree_counts)
+
+# Create a scatter plot of the degree distribution
+plot((as.numeric(names(degree_probabilities))), (degree_probabilities),
+     main = "Degree Distribution of Following Network",
+     xlab = "Degree",
+     ylab = "",
+     col = "blue",
+     pch = 16)
+
+# Add y-axis values
+axis(2, at = pretty(degree_probabilities), labels = pretty(degree_probabilities))
+
+# Add the y-axis label
+mtext("Probability", side = 2, line = 2.5)
+
+# Create a scatter plot of the degree distribution
+plot(log(as.numeric(names(degree_probabilities))), log(degree_probabilities),
+     main = "Degree Distribution of Following Network",
+     xlab = "Degree",
+     ylab = " ",
+     col = "blue",
+     pch = 16)
+# Add y-axis values
+axis(2, at = pretty(log(degree_probabilities)), labels = pretty(log(degree_probabilities)))
+
+# Add the y-axis label
+mtext("Probability", side = 2, line = 2.5)
+
+# Creating tracking plot of opinion polls ---------------------------------
+
+# URL of the Wikipedia page
+url <- "https://es.wikipedia.org/wiki/Anexo:Sondeos_de_las_elecciones_presidenciales_de_Costa_Rica_de_2018"
+
+# Read the HTML table from the Wikipedia page
+page <- read_html(url)
+table <- html_table(html_nodes(page, "table")[[4]])
+
+colnames(table) <- table[1,]
+table <- table[4:dim(table)[1],]
+
+# Summarizing the date of the poll
+# Function to format the date
+format_date <- function(date_string) {
+  matches <- str_match(date_string, "(\\d+) al \\d+ de (\\p{L}+) de (\\d+)")
+  day <- matches[1, 2]
+  month <- matches[1, 3]
+  year <- matches[1, 4]
+  formatted_date <- paste(day, "de", month, "de", year)
+  return(formatted_date)
+}
+
+# Apply the function to the date_string column
+opinion_polls <- table %>%
+  mutate(formatted_date = sapply(Fecha, format_date)) %>% 
+  select(-Fecha)
+
+# Cleaning the name of the polling firm
+opinion_polls$Encuestadora <- str_remove_all(opinion_polls$Encuestadora, "\\[\\d+\\]")
+
+# Removing firms that did non representative polls
+opinion_polls <- opinion_polls[-20,]
+opinion_polls <- opinion_polls[!opinion_polls$Encuestadora %in% c("Demoscopía​","Demoscopia​"), ]
+opinion_polls <- opinion_polls[!opinion_polls$Encuestadora == "Idespo​", ]
+colnames(opinion_polls) <- c("Poll","Carlos Alvarado","Fabricio Alvarado",
+                             "Antonio Alvarez","Juan Diego Castro","Otto Guevara",
+                             "Rodolfo Hernández","Rodolfo Piza","Others","No vote","Don't know","Date")
+
+ciep_poll <- data.frame(opinion_polls %>% filter(Poll == "CIEP​") %>% select(-Poll))
+opol_poll <- data.frame(opinion_polls %>% filter(Poll == "OPol​") %>% select(-Poll))
+cid_gallup_poll <- data.frame(opinion_polls %>% filter(Poll == "CID Gallup​") %>% select(-Poll))
+
+
+cid_gallup_poll = gather(cid_gallup_poll, key = "Candidate", value = "percen", 1:10)
+opol_poll = gather(opol_poll, key = "Candidate", value = "percen", 1:10)
+ciep_poll = gather(ciep_poll, key = "Candidate", value = "percen", 1:10)
+
+# Define the translation dictionary
+month_translation <- c("enero" = "January", "febrero" = "February", "marzo" = "March", "abril" = "April",
+                       "mayo" = "May", "junio" = "June", "julio" = "July", "agosto" = "August",
+                       "septiembre" = "September", "octubre" = "October", "noviembre" = "November", "diciembre" = "December")
+
+# Combined function
+process_dates <- function(df) {
+  # Function to replace the month in Spanish with English
+  replace_month <- function(date) {
+    for (spanish_month in names(month_translation)) {
+      date <- str_replace(date, paste0("\\b", spanish_month, "\\b"), month_translation[spanish_month])
+    }
+    return(date)
+  }
+  
+  # Substitute Spanish months with English months in the date column
+  df <- df %>%
+    mutate(poll_date = replace_month(Date))
+  
+  # Remove "de" from the date column
+  df$poll_date <- str_replace_all(df$poll_date, "de", "")
+  
+  # Convert string to date format
+  df$poll_date <- as.Date(df$poll_date, format = "%d  %B  %Y")
+  
+  # Convert date to desired format
+  df$poll_date <- format(df$poll_date, "%d/%m/%Y")
+  df$poll_date <- as.Date(df$poll_date, "%d/%m/%Y")
+  df <- df %>% select(-Date)
+  return(df)
+}
+
+cid_gallup_poll = process_dates(cid_gallup_poll)
+ciep_poll = process_dates(ciep_poll)
+opol_poll = process_dates(opol_poll)
+
+cid_gallup_poll$percen <- as.numeric(str_replace_all(cid_gallup_poll$percen,"%",""))
+ciep_poll$percen <- as.numeric(str_replace_all(ciep_poll$percen,"%",""))
+opol_poll$percen <- as.numeric(str_replace_all(opol_poll$percen,"%",""))
+
+court_ruling <- as.Date("2018-01-09")
+first_elections <- as.Date("2018-02-04")
+second_elections <- as.Date("2018-04-01")
+
+cid_gallup_poll_plot <- ggplot(cid_gallup_poll, aes(x = poll_date, y = percen, color = Candidate)) +
+  geom_line(aes(alpha = ifelse(Candidate %in% c("Carlos.Alvarado", "Fabricio.Alvarado"), 1, 0.3))) +
+  geom_vline(xintercept = court_ruling, linetype = "dashed", color = "red", alpha = 0.5) +
+  geom_vline(xintercept = first_elections, linetype = "dashed", color = "blue", alpha = 0.5) +
+  geom_vline(xintercept = second_elections, linetype = "dashed", color = "cyan", alpha = 0.5) +
+  geom_point(alpha = ifelse(cid_gallup_poll$Candidate %in% c("Carlos.Alvarado", "Fabricio.Alvarado"), 1, 0.3)) +
+  geom_text(aes(x = court_ruling, y = 35, label = "Court Ruling"),
+            color = "red", angle = 90, vjust = -0.5, size = 3) +
+  geom_text(aes(x = first_elections, y = 35, label = "First Elections"),
+            color = "blue", angle = 90, vjust = -0.5, size = 3) +
+  geom_text(aes(x = second_elections, y = 35, label = "Second Elections"),
+            color = "blue", angle = 90, vjust = -0.5, size = 3) +
+  labs(x = "Date", y = "Percentage", title = "Cid Gallup Polling Firm - Voting intention for presidential elections") +
+  theme_minimal() +
+  guides(alpha = FALSE)  # Remove alpha legend
+
+ciep_poll_plot <- ggplot(ciep_poll, aes(x = poll_date, y = percen, color = Candidate)) +
+  geom_line(aes(alpha = ifelse(Candidate %in% c("Carlos.Alvarado", "Fabricio.Alvarado"), 1, 0.3))) +
+  geom_vline(xintercept = court_ruling, linetype = "dashed", color = "red", alpha = 0.5) +
+  geom_vline(xintercept = first_elections, linetype = "dashed", color = "blue", alpha = 0.5) +
+  geom_vline(xintercept = second_elections, linetype = "dashed", color = "cyan", alpha = 0.5) +
+  geom_point(alpha = ifelse(ciep_poll$Candidate %in% c("Carlos.Alvarado", "Fabricio.Alvarado"), 1, 0.3)) +
+  geom_text(aes(x = court_ruling, y = 35, label = "Court Ruling"),
+            color = "red", angle = 90, vjust = -0.5, size = 3) +
+  geom_text(aes(x = first_elections, y = 35, label = "First Elections"),
+            color = "blue", angle = 90, vjust = -0.5, size = 3) +
+  geom_text(aes(x = second_elections, y = 35, label = "Second Elections"),
+            color = "blue", angle = 90, vjust = -0.5, size = 3) +
+  labs(x = "Date", y = "Percentage", title = "Ciep Polling Firm") +
+  theme_minimal() +
+  guides(color = FALSE, alpha = FALSE) + # Remove alpha legend +
+  theme(plot.title = element_text(hjust = 0.5)) + # Center the plot title
+  ylim(0,50)
+
+opol_poll_plot <- ggplot(opol_poll, aes(x = poll_date, y = percen, color = Candidate)) +
+  geom_line(aes(alpha = ifelse(Candidate %in% c("Carlos.Alvarado", "Fabricio.Alvarado"), 1, 0.3))) +
+  geom_vline(xintercept = court_ruling, linetype = "dashed", color = "red", alpha = 0.5) +
+  geom_vline(xintercept = first_elections, linetype = "dashed", color = "blue", alpha = 0.5) +
+  geom_vline(xintercept = second_elections, linetype = "dashed", color = "cyan", alpha = 0.5) +
+  geom_point(alpha = ifelse(opol_poll$Candidate %in% c("Carlos.Alvarado", "Fabricio.Alvarado"), 1, 0.3)) +
+  geom_text(aes(x = court_ruling, y = 35, label = "Court Ruling"),
+            color = "red", angle = 90, vjust = -0.5, size = 3) +
+  geom_text(aes(x = first_elections, y = 35, label = "First Elections"),
+            color = "blue", angle = 90, vjust = -0.5, size = 3) +
+  geom_text(aes(x = second_elections, y = 35, label = "Second Elections"),
+            color = "blue", angle = 90, vjust = -0.5, size = 3) +
+  labs(x = "Date", y = "Percentage", title = "Opol Polling Firm") +
+  theme_minimal() +
+  guides(color = FALSE, alpha = FALSE) + # Remove alpha legend +
+  theme(plot.title = element_text(hjust = 0.5)) + # Center the plot title
+  ylim(0,50)
+
+par(mfrow = c(2,2), col.axis = "white", col.lab = "white", tck = 0)
+grid.arrange(opol_poll_plot, ciep_poll_plot, ncol=2)
+par(mfrow = c(1,1))
+
+
+
+
+
+
+
+
+
+
+
+
+# TO ERASE Save this to count the number of users extracted for FAM (don't run)----------------------------------------------------------------
+
+directory <- setwd("/Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/III_Semester/ModelingComplexSystems/FinalProject/scraped_tweets/network_carlos_avl")
+
+file_names <- list.files(directory)
+# Dataframe that collects everything??
+total_data_frame_fam <- data.frame()
+# Dataframe that collects the analyzed polarized users and finds the percentage of its following network
+# that is polarized towards one or the other candidate or that isn't polarized or engaged.
+fraction_network_fam <- data.frame()
+zzz <- c()
+
+#for each user in the polarized users that we have decided to analyze
+for(user_t in 1:length(file_names)){
+  # Identify the source user, who is the one for whom we're gonna analyze its network
+  source_user <- file_names[user_t]
+  
+  # Extract the following network retrieved for this user
+  doc_to_extract <- source_user
+  following_pol_fam <- stream_in(file(doc_to_extract),pagesize = 10000)
+  following_pol_fam <- following_pol_fam$data
+  
+  # Parse the data
+  following_parsed_fam <- following_parsing_fam(following_pol_fam)
+  # Identify users that 1) are part of the users' network and 2) have liked at least
+  # 1 tweet of one of the two candidates.
+  following_present_in_merged_fam <- following_parsed_fam$user_id
+  
+  if(length(following_present_in_merged_fam) == 0){
+    next
+  }
+  zzz <- c(zzz,following_present_in_merged_fam)
+}
+
+eng_pol_fam <- left_join(fraction_network_fam,merged_df,by = c("source_user_id" = "user_id"))
